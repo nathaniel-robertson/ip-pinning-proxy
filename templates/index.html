@@ -37,7 +37,7 @@
         </div>
         <div class="checkbox-group">
             <input type="checkbox" id="add-ua-suffix" name="add-ua-suffix">
-            <label for="add-ua-suffix">Append custom string to User-Agent</label>
+            <label for="add-ua-suffix">Append "Nat's IP Pinning Proxy Tool" to User-Agent</label>
         </div>
         <div class="checkbox-group">
             <input type="checkbox" id="dynamic-rewrite" name="dynamic-rewrite">
@@ -76,14 +76,8 @@
         const path = initialPathInput.value || '/';
 
         if (domain && ip) {
-            // MODIFIED: URL structure is now /ip/domain/path
             let baseUrl = `/${ip}/${domain}${path === '/' ? '' : path}`;
             const finalUrl = new URL(baseUrl, window.location.origin);
-
-            if (uaCheckbox.checked) {
-                finalUrl.searchParams.append('add_ua_suffix', 'true');
-            }
-            
             window.location.href = finalUrl.href;
         } else {
             alert('Please fill in a valid domain/URL and ensure an IP address is populated.');
