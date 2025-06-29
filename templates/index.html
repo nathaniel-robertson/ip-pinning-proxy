@@ -22,8 +22,8 @@
     <h1>IP Pinning Proxy Tool</h1>
     <form id="proxy-form">
         <div>
-            <label for="domain">Domain Name:</label>
-            <input type="text" id="domain" name="domain" placeholder="e.g., example.com" required>
+            <label for="domain">Domain Name or Full URL:</label>
+            <input type="text" id="domain" name="domain" placeholder="e.g., https://example.com/some/page" required>
         </div>
         <div>
             <label for="ip">Pin to IP Address:</label>
@@ -34,6 +34,7 @@
             <input type="checkbox" id="add-ua-suffix" name="add-ua-suffix">
             <label for="add-ua-suffix">Append custom string to User-Agent</label>
         </div>
+        <input type="hidden" id="initial-path" value="/">
         <button type="submit">Start Browse</button>
     </form>
 
@@ -42,10 +43,13 @@
     const ipInput = document.getElementById('ip');
     const lookupStatus = document.getElementById('lookup-status');
     const proxyForm = document.getElementById('proxy-form');
+    const initialPathInput = document.getElementById('initial-path');
 
-    // Perform DNS lookup when the user finishes typing in the domain
-    domainInput.addEventListener('blur', async () => {
-        const domain = domainInput.value.trim();
+    let dnsLookupTimer;
+    let isParsingUrl = false; // Flag to prevent event loops
+
+    // This function performs the DNS lookup
+    const performDnsLookup = async (domain) => {
         if (!domain) return;
 
         lookupStatus.textContent = 'Looking up IP...';
@@ -63,6 +67,39 @@
             console.error('DNS Lookup failed:', error);
             lookupStatus.textContent = `❌ Could not resolve domain.`;
         }
+    };
+
+    // Event listener for when the user types or pastes into the domain field
+    domainInput.addEventListener('input', () => {
+        if (isParsingUrl) return; // Prevent loop if we are modifying the input value ourselves
+
+        clearTimeout(dnsLookupTimer); // Debounce the lookup
+        const value = domainInput.value.trim();
+
+        try {
+            // Prepend a protocol if missing, to help the URL parser
+            const fullUrl = value.startsWith('http') ? value : `https://${value}`;
+            const url = new URL(fullUrl);
+
+            // If we successfully parse a URL with a valid hostname
+            if (url.hostname && url.hostname.includes('.')) {
+                isParsingUrl = true; // Set flag
+                domainInput.value = url.hostname; // Update input with just the domain
+                const path = url.pathname === '/' && url.search === '' ? '/' : url.pathname + url.search;
+                initialPathInput.value = path; // Store the path
+                performDnsLookup(url.hostname); // Trigger lookup immediately
+                isParsingUrl = false; // Unset flag
+                return;
+            }
+        } catch (e) {
+            // It's not a valid URL, treat it as a domain being typed
+            initialPathInput.value = '/'; // Reset path to default
+        }
+
+        // Debounced lookup for manual typing
+        dnsLookupTimer = setTimeout(() => {
+            performDnsLookup(value);
+        }, 300);
     });
 
     // Handle form submission to redirect to the correct proxy URL
@@ -71,13 +108,18 @@
         const domain = domainInput.value.trim();
         const ip = ipInput.value.trim();
         const addSuffix = document.getElementById('add-ua-suffix').checked;
+        const path = initialPathInput.value || '/'; // Use stored path or default
 
         if (domain && ip) {
-            let url = `/${domain}/${ip}/`;
+            let baseUrl = `/${domain}/${ip}${path === '/' ? '' : path}`;
+            
+            // Correctly append the user-agent suffix parameter
+            const finalUrl = new URL(baseUrl, window.location.origin);
             if (addSuffix) {
-                url += '?add_ua_suffix=true';
+                finalUrl.searchParams.append('add_ua_suffix', 'true');
             }
-            window.location.href = url;
+            
+            window.location.href = finalUrl.href;
         } else {
             alert('Please fill in both the domain and IP address.');
         }
