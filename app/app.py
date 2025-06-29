@@ -3,6 +3,7 @@ import os
 import socket
 import re
 import logging
+import bcrypt # NEW: Import bcrypt
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -12,7 +13,7 @@ from bs4.element import Comment
 from flask import (Flask, Response, abort, jsonify, redirect,
                    render_template, request, url_for)
 
-# --- (SNI-Fix: Custom Adapter, getaddrinfo_pinned, and HostPinningAdapter class are unchanged) ---
+# --- (SNI-Fix is unchanged) ---
 _original_getaddrinfo = socket.getaddrinfo
 def getaddrinfo_pinned(host, port, family=0, type=0, proto=0, flags=0):
     pinned_host = request.view_args['target_domain']
@@ -36,23 +37,56 @@ if os.environ.get('PROXY_VERBOSE_LOGGING'):
 else:
     app.logger.setLevel(logging.WARNING)
 
-# --- (Auth is unchanged) ---
+# --- MODIFIED: Smart Authentication Logic ---
 def auth_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        proxy_user = os.environ.get("PROXY_USER"); proxy_password = os.environ.get("PROXY_PASSWORD")
-        if not proxy_user or not proxy_password: return f(*args, **kwargs)
+        proxy_user = os.environ.get("PROXY_USER")
+        proxy_password = os.environ.get("PROXY_PASSWORD")
+        # If no credentials are set, allow access (for easy local dev)
+        if not proxy_user or not proxy_password:
+            return f(*args, **kwargs)
+
         auth = request.authorization
-        if not auth or not (auth.username == proxy_user and auth.password == proxy_password):
-            return Response('Could not verify your access level.', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+        # Check if login credentials were provided by the browser
+        if not auth or not auth.username or not auth.password:
+            return Response(
+                'Could not verify your access level.', 401,
+                {'WWW-Authenticate': 'Basic realm="Login Required"'}
+            )
+
+        # Check for username match first
+        if auth.username != proxy_user:
+            return Response('Invalid username.', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+        # Smart password check
+        is_password_correct = False
+        stored_credential = os.environ.get("PROXY_PASSWORD", "")
+        provided_password = auth.password.encode('utf-8')
+
+        if stored_credential.startswith('$2b$'):
+            # If it looks like a hash, use bcrypt to check
+            app.logger.debug("Verifying password against a bcrypt hash.")
+            is_password_correct = bcrypt.checkpw(provided_password, stored_credential.encode('utf-8'))
+        else:
+            # Otherwise, use simple plaintext comparison
+            app.logger.debug("Verifying password against plaintext string.")
+            is_password_correct = (auth.password == stored_credential)
+
+        if not is_password_correct:
+            return Response('Invalid password.', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+        
+        # If we get here, authentication succeeded
         return f(*args, **kwargs)
     return decorated
 
-# --- (Routes index, dns_lookup are unchanged) ---
+# --- (All other routes and logic are unchanged) ---
 @app.route('/')
 @auth_required
 def index():
     return render_template('index.html')
+
+# ... (rest of the file is identical to the previous version) ...
 @app.route('/dns-lookup')
 @auth_required
 def dns_lookup():
@@ -61,32 +95,24 @@ def dns_lookup():
     try: ip_address = socket.gethostbyname(domain); return jsonify({"ip": ip_address})
     except socket.gaierror: return jsonify({"error": "Domain not found"}), 404
 
-# --- Proxy Route (Main logic updated) ---
 @app.route('/<string:target_ip>/<string:target_domain>/', defaults={'path': ''})
 @app.route('/<string:target_ip>/<string:target_domain>/<path:path>')
 @auth_required
 def proxy_request(target_ip, target_domain, path):
-    
     app.logger.info(f"Request for {target_domain} (pinned to {target_ip}) at path /{path} from client {request.remote_addr}")
-    
     session = requests.Session(); session.mount(f"https://{target_domain}", HostPinningAdapter())
     if request.query_string: path = f"{path}?{request.query_string.decode('utf-8')}"
     url_to_fetch = f"https://{target_domain}/{path}"
-    
-    # MODIFIED: Logic to check for the cookie instead of the query parameter
     headers = { 'User-Agent': request.headers.get('User-Agent'), 'X-Forwarded-For': request.remote_addr, 'Accept-Encoding': 'gzip, deflate' }
     if request.cookies.get('addUaSuffix') == 'true':
         headers['User-Agent'] += " Nat's IP Pinning Proxy Tool"
         app.logger.debug("Appending custom string to User-Agent.")
-
     try:
         proxied_response = session.get( url_to_fetch, headers=headers, allow_redirects=False, stream=True )
         app.logger.debug(f"Upstream response: {proxied_response.status_code} | {proxied_response.headers.get('Content-Type', 'N/A')}")
     except requests.exceptions.RequestException as e:
         app.logger.error(f"Upstream connection error: {e}")
         return f"<h1>Proxy Error</h1><p>Could not connect to IP {target_ip} for domain {target_domain}.</p><p>{e}</p>", 502
-
-    # --- (All subsequent logic is unchanged) ---
     if proxied_response.is_redirect:
         location = proxied_response.headers['location']; parsed_loc = urlparse(location)
         if parsed_loc.netloc == target_domain:
@@ -95,7 +121,6 @@ def proxy_request(target_ip, target_domain, path):
         elif not parsed_loc.netloc:
              return redirect(f"/{target_ip}/{target_domain}/{location.lstrip('/')}")
         else: return redirect(location)
-
     content_type = proxied_response.headers.get('Content-Type', '').lower()
     if 'text/html' in content_type:
         app.logger.debug("Performing static HTML rewrite.")
@@ -129,7 +154,7 @@ def proxy_request(target_ip, target_domain, path):
                 node.replace_with(text_pattern.sub(proxy_root_path, node))
         if request.cookies.get('dynamicRewrite') == 'true' and soup.head:
             app.logger.debug("Injecting dynamic MutationObserver script.")
-            observer_script_text = f''' ... ''' # (script content omitted for brevity)
+            observer_script_text = f'''...''' # (omitted for brevity)
             script_tag = soup.new_tag("script"); script_tag.string = observer_script_text; soup.head.append(script_tag)
         content = soup.prettify()
     else:
