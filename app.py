@@ -1,13 +1,13 @@
 # app.py
 import os
 import socket
-import re # Import the regular expressions module
+import re
 from functools import wraps
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from bs4.element import Comment # Import Comment to ignore text in comments
+from bs4.element import Comment
 from flask import (Flask, Response, abort, jsonify, redirect,
                    render_template, request, url_for)
 
@@ -110,8 +110,12 @@ def proxy_request(target_domain, target_ip, path):
         proxy_root_path = f"/{target_domain}/{target_ip}"
 
         def rewrite_url(url_string):
-            if not url_string or url_string.startswith('#') or url_string.startswith('data:'):
+            # FIX 1: Ignore common non-HTTP URI schemes like mailto: and tel:
+            if (not url_string or url_string.startswith('#') or 
+                url_string.startswith('data:') or url_string.startswith('mailto:') or
+                url_string.startswith('tel:')):
                 return url_string
+            
             parsed_url = urlparse(url_string)
             if parsed_url.netloc == target_domain:
                 return f"{proxy_root_path}{parsed_url.path}" + (f"?{parsed_url.query}" if parsed_url.query else "")
@@ -137,30 +141,22 @@ def proxy_request(target_domain, target_ip, path):
                     rewritten_parts.append(rewrite_url(url) + (descriptor or ""))
             tag['srcset'] = ', '.join(rewritten_parts)
 
-        # 2. NEW: Rewrite URLs within inline `style` attributes
-        # e.g., <div style="background-image: url(https://domain.com/bg.jpg)">
+        # 2. Rewrite URLs within inline `style` attributes
         url_pattern = re.compile(r'url\s*\((?!["\']?data:)["\']?([^"\'\)]*)["\']?\s*\)', re.IGNORECASE)
         for tag in soup.find_all(attrs={'style': True}):
             new_style = re.sub(url_pattern, lambda m: f"url({rewrite_url(m.group(1))})", tag['style'])
             tag['style'] = new_style
             
-        # 3. NEW: Search and replace domain in visible text content
-        # This is a broad replacement, so we restrict it to the `<body>`
-        # and exclude script/style tags to avoid breaking code.
+        # 3. Search and replace domain in visible text content
         if soup.body:
-            # We compile a regex to find the target domain as a whole word or next to punctuation
-            # This avoids replacing `subdomain.example.com` if we are only replacing `example.com`
-            text_pattern = re.compile(r'\b' + re.escape(target_domain) + r'\b', re.IGNORECASE)
+            # FIX 2: Use a negative lookbehind `(?<!@)` to avoid matching domain names
+            # that are part of an email address.
+            text_pattern = re.compile(r'(?<!@)\b' + re.escape(target_domain) + r'\b', re.IGNORECASE)
             
-            # Find all text nodes in the body
             text_nodes = soup.body.find_all(string=True)
-            
             for node in text_nodes:
-                # Ignore text inside <script> and <style> tags, and comments
                 if node.parent.name in ['script', 'style'] or isinstance(node, Comment):
                     continue
-                
-                # Use the replace_with method to modify the text node in place
                 new_text = text_pattern.sub(proxy_root_path, node)
                 node.replace_with(new_text)
 
