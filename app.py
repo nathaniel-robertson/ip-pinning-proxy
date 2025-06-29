@@ -86,7 +86,7 @@ def proxy_request(target_domain, target_ip, path):
     if 'text/html' in content_type:
         soup = BeautifulSoup(proxied_response.content, 'html.parser')
         proxy_root_path = f"/{target_domain}/{target_ip}"
-
+        
         # --- (All previous rewriting logic is unchanged) ---
         def rewrite_url(url_string):
             if (not url_string or url_string.startswith(('#', 'data:', 'mailto:', 'tel:'))): return url_string
@@ -115,9 +115,12 @@ def proxy_request(target_domain, target_ip, path):
                 if node.parent.name in ['script', 'style'] or isinstance(node, Comment): continue
                 node.replace_with(text_pattern.sub(proxy_root_path, node))
 
-        # --- NEW: Inject MutationObserver script if enabled ---
-        if request.args.get('enable_dynamic_rewrite') == 'true' and soup.head:
-            observer_script_text = f"""
+        # --- MODIFIED: Inject script based on COOKIE, not query string ---
+        # --- and fixed the syntax error in the script string ---
+        if request.cookies.get('dynamicRewrite') == 'true' and soup.head:
+            # BUGFIX: Use triple quotes for the multi-line f-string to prevent syntax errors
+            # with the internal double quotes used by the JavaScript code.
+            observer_script_text = f'''
             <script>
             (function() {{
                 const targetDomain = "{target_domain}";
@@ -129,26 +132,22 @@ def proxy_request(target_domain, target_ip, path):
                         return urlString;
                     }}
                     try {{
-                        const url = new URL(urlString, `https://{targetDomain}`);
+                        // Use a base URL to handle both absolute and relative paths correctly
+                        const url = new URL(urlString, `https://{targetDomain}${currentPath}`);
                         if (url.hostname === targetDomain) {{
                             return proxyRoot + url.pathname + url.search;
                         }}
                     }} catch (e) {{
-                        // Handle relative paths
-                        if (!urlString.startsWith('http') && !urlString.startsWith('//')) {{
-                           const basePath = currentPath.substring(0, currentPath.lastIndexOf('/'));
-                           // Simple path join, for more complex cases a library would be better
-                           return proxyRoot + basePath + '/' + urlString;
-                        }}
+                        console.error("URL rewrite failed for:", urlString, e);
                     }}
-                    return urlString;
+                    return urlString; // Return original if it's an external URL or fails
                 }}
 
                 function processNode(node) {{
                     if (node.nodeType !== 1) return; // Only process element nodes
                     
-                    if (node.hasAttribute('href')) node.href = rewriteUrl(node.getAttribute('href'));
-                    if (node.hasAttribute('src')) node.src = rewriteUrl(node.getAttribute('src'));
+                    if (node.hasAttribute('href')) node.setAttribute('href', rewriteUrl(node.getAttribute('href')));
+                    if (node.hasAttribute('src')) node.setAttribute('src', rewriteUrl(node.getAttribute('src')));
                     if (node.hasAttribute('srcset')) {{
                         const newSrcset = node.getAttribute('srcset').split(',').map(part => {{
                             const item = part.trim().split(/\s+/);
@@ -170,11 +169,17 @@ def proxy_request(target_domain, target_ip, path):
                     }});
                 }});
 
-                observer.observe(document.body, {{ childList: true, subtree: true }});
+                // Start observing the body for changes as soon as it exists.
+                if (document.body) {{
+                    observer.observe(document.body, {{ childList: true, subtree: true }});
+                }} else {{
+                    document.addEventListener('DOMContentLoaded', () => {{
+                        observer.observe(document.body, {{ childList: true, subtree: true }});
+                    }});
+                }}
             }})();
             </script>
-            """
-            # Inject the script into the page's head
+            '''
             script_tag = soup.new_tag("script")
             script_tag.string = observer_script_text
             soup.head.append(script_tag)
@@ -182,8 +187,7 @@ def proxy_request(target_domain, target_ip, path):
         content = soup.prettify()
     else:
         content = proxied_response.raw
-
-    # --- (Header and final response logic is unchanged) ---
+        
     excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
     headers_to_pass = [(k, v) for k, v in proxied_response.raw.headers.items() if k.lower() not in excluded_headers]
     return Response(content, proxied_response.status_code, headers_to_pass)
