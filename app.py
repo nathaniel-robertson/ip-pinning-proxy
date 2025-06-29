@@ -115,11 +115,9 @@ def proxy_request(target_domain, target_ip, path):
                 if node.parent.name in ['script', 'style'] or isinstance(node, Comment): continue
                 node.replace_with(text_pattern.sub(proxy_root_path, node))
 
-        # --- MODIFIED: Inject script based on COOKIE, not query string ---
-        # --- and fixed the syntax error in the script string ---
+        # --- MODIFIED: Inject script based on COOKIE and fixed the NameError ---
         if request.cookies.get('dynamicRewrite') == 'true' and soup.head:
-            # BUGFIX: Use triple quotes for the multi-line f-string to prevent syntax errors
-            # with the internal double quotes used by the JavaScript code.
+            # Use triple quotes and the correct Python variable `{target_domain}`
             observer_script_text = f'''
             <script>
             (function() {{
@@ -132,20 +130,19 @@ def proxy_request(target_domain, target_ip, path):
                         return urlString;
                     }}
                     try {{
-                        // Use a base URL to handle both absolute and relative paths correctly
-                        const url = new URL(urlString, `https://{targetDomain}${currentPath}`);
+                        // BUGFIX: Use the correct python variable `{target_domain}` here
+                        const url = new URL(urlString, `https://{target_domain}${currentPath}`);
                         if (url.hostname === targetDomain) {{
                             return proxyRoot + url.pathname + url.search;
                         }}
                     }} catch (e) {{
                         console.error("URL rewrite failed for:", urlString, e);
                     }}
-                    return urlString; // Return original if it's an external URL or fails
+                    return urlString;
                 }}
 
                 function processNode(node) {{
-                    if (node.nodeType !== 1) return; // Only process element nodes
-                    
+                    if (node.nodeType !== 1) return;
                     if (node.hasAttribute('href')) node.setAttribute('href', rewriteUrl(node.getAttribute('href')));
                     if (node.hasAttribute('src')) node.setAttribute('src', rewriteUrl(node.getAttribute('src')));
                     if (node.hasAttribute('srcset')) {{
@@ -169,7 +166,6 @@ def proxy_request(target_domain, target_ip, path):
                     }});
                 }});
 
-                // Start observing the body for changes as soon as it exists.
                 if (document.body) {{
                     observer.observe(document.body, {{ childList: true, subtree: true }});
                 }} else {{

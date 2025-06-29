@@ -21,7 +21,6 @@
 <body>
 
     <h1>IP Pinning Proxy Tool</h1>
-
     <p class="intro">
         This tool allows you to browse a website while forcing all requests for that domain to be "pinned" to a specific IP address, bypassing standard DNS. To begin, enter a full URL or a domain name. The tool will look up the current IP and you can override it if needed. When you click "Start Browse," all links and resources will be rewritten to keep you within the proxy.
     </p>
@@ -51,7 +50,6 @@
     </form>
 
 <script>
-    // --- Get DOM Elements ---
     const domainInput = document.getElementById('domain-input');
     const ipInput = document.getElementById('ip');
     const lookupStatus = document.getElementById('lookup-status');
@@ -59,22 +57,18 @@
     const parsedDomainInput = document.getElementById('parsed-domain');
     const initialPathInput = document.getElementById('initial-path');
     const uaCheckbox = document.getElementById('add-ua-suffix');
-    const dynamicCheckbox = document.getElementById('dynamic-rewrite'); // NEW
+    const dynamicCheckbox = document.getElementById('dynamic-rewrite');
 
-    // --- (Cookie Helper Functions are unchanged) ---
     const setCookie = (name, value, days) => { let expires = ""; if (days) { const date = new Date(); date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000)); expires = "; expires=" + date.toUTCString(); } document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Lax"; };
     const getCookie = (name) => { const nameEQ = name + "="; const ca = document.cookie.split(';'); for (let i = 0; i < ca.length; i++) { let c = ca[i]; while (c.charAt(0) === ' ') c = c.substring(1, c.length); if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length); } return null; };
 
-    // --- (Main Application Logic is mostly unchanged, just adds handling for new checkbox) ---
     let dnsLookupTimer;
     const performDnsLookup = async (domain) => { if (!domain || !domain.includes('.')) return; lookupStatus.textContent = 'Looking up IP...'; ipInput.value = ''; try { const response = await fetch(`/dns-lookup?domain=${encodeURIComponent(domain)}`); if (!response.ok) throw new Error('Domain not found'); const data = await response.json(); ipInput.value = data.ip; lookupStatus.textContent = `✅ Found IP: ${data.ip}`; } catch (error) { lookupStatus.textContent = `❌ Could not resolve domain.`; } };
     domainInput.addEventListener('input', () => { clearTimeout(dnsLookupTimer); const value = domainInput.value.trim(); try { const fullUrl = value.startsWith('http') || value.startsWith('//') ? value : `https://${value}`; const url = new URL(fullUrl); if (url.hostname && url.hostname.includes('.')) { parsedDomainInput.value = url.hostname; const path = url.pathname === '/' && url.search === '' ? '/' : url.pathname + url.search; initialPathInput.value = path; performDnsLookup(url.hostname); return; } } catch (e) {} parsedDomainInput.value = value; initialPathInput.value = '/'; dnsLookupTimer = setTimeout(() => { performDnsLookup(value); }, 300); });
 
-    // --- Event Listeners for Preferences ---
     uaCheckbox.addEventListener('change', () => setCookie('addUaSuffix', uaCheckbox.checked, 365));
-    dynamicCheckbox.addEventListener('change', () => setCookie('dynamicRewrite', dynamicCheckbox.checked, 365)); // NEW
+    dynamicCheckbox.addEventListener('change', () => setCookie('dynamicRewrite', dynamicCheckbox.checked, 365));
 
-    // --- Form Submission Logic ---
     proxyForm.addEventListener('submit', (event) => {
         event.preventDefault();
         const domain = parsedDomainInput.value.trim();
@@ -84,23 +78,26 @@
         if (domain && ip) {
             let baseUrl = `/${domain}/${ip}${path === '/' ? '' : path}`;
             const finalUrl = new URL(baseUrl, window.location.origin);
+
+            // The user agent suffix is the only one that needs to be a query param
+            // because the server can't know about it otherwise (it's a one-time thing per session).
             if (uaCheckbox.checked) {
                 finalUrl.searchParams.append('add_ua_suffix', 'true');
             }
-            if (dynamicCheckbox.checked) { // NEW
-                finalUrl.searchParams.append('enable_dynamic_rewrite', 'true');
-            }
+            
+            // REMOVED: The dynamic rewrite logic is no longer appended here.
+            // The server will use the cookie instead.
+
             window.location.href = finalUrl.href;
         } else {
             alert('Please fill in a valid domain/URL and ensure an IP address is populated.');
         }
     });
 
-    // --- On Page Load ---
     const savedUaState = getCookie('addUaSuffix');
     if (savedUaState === 'true') uaCheckbox.checked = true;
 
-    const savedDynamicState = getCookie('dynamicRewrite'); // NEW
+    const savedDynamicState = getCookie('dynamicRewrite');
     if (savedDynamicState === 'true') dynamicCheckbox.checked = true;
 </script>
 
