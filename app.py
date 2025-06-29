@@ -87,15 +87,16 @@ def proxy_request(target_domain, target_ip, path):
         soup = BeautifulSoup(proxied_response.content, 'html.parser')
         proxy_root_path = f"/{target_domain}/{target_ip}"
         
-        # --- (All previous rewriting logic is unchanged) ---
         def rewrite_url(url_string):
             if (not url_string or url_string.startswith(('#', 'data:', 'mailto:', 'tel:'))): return url_string
             parsed_url = urlparse(url_string)
             if parsed_url.netloc == target_domain: return f"{proxy_root_path}{parsed_url.path}" + (f"?{parsed_url.query}" if parsed_url.query else "")
-            elif not parsed_url.scheme and not parsed_loc.netloc:
+            # BUGFIX: Use the correct variable `parsed_url` instead of `parsed_loc`.
+            elif not parsed_url.scheme and not parsed_url.netloc:
                 base_path = os.path.dirname(path.split('?')[0]); absolute_path = os.path.normpath(os.path.join(base_path, url_string))
                 return f"{proxy_root_path}{absolute_path}"
             return url_string
+        
         for tag in soup.find_all(attrs={'href': True}): tag['href'] = rewrite_url(tag['href'])
         for tag in soup.find_all(attrs={'src': True}): tag['src'] = rewrite_url(tag['src'])
         for tag in soup.find_all(attrs={'srcset': True}):
@@ -115,7 +116,6 @@ def proxy_request(target_domain, target_ip, path):
                 if node.parent.name in ['script', 'style'] or isinstance(node, Comment): continue
                 node.replace_with(text_pattern.sub(proxy_root_path, node))
 
-        # --- MODIFIED: Inject script based on COOKIE and fixed the NameError ---
         if request.cookies.get('dynamicRewrite') == 'true' and soup.head:
             observer_script_text = f'''
             <script>
@@ -129,11 +129,8 @@ def proxy_request(target_domain, target_ip, path):
                         return urlString;
                     }}
                     try {{
-                        // BUGFIX: Use standard string concatenation to create the base URL.
-                        // This avoids the syntax collision between Python f-strings and JS template literals.
                         const baseUrl = 'https://' + targetDomain + currentPath;
                         const url = new URL(urlString, baseUrl);
-
                         if (url.hostname === targetDomain) {{
                             return proxyRoot + url.pathname + url.search;
                         }}
@@ -148,8 +145,9 @@ def proxy_request(target_domain, target_ip, path):
                     if (node.hasAttribute('href')) node.setAttribute('href', rewriteUrl(node.getAttribute('href')));
                     if (node.hasAttribute('src')) node.setAttribute('src', rewriteUrl(node.getAttribute('src')));
                     if (node.hasAttribute('srcset')) {{
+                        // BUGFIX: Escape the backslash in `\\s+` to fix the SyntaxWarning.
                         const newSrcset = node.getAttribute('srcset').split(',').map(part => {{
-                            const item = part.trim().split(/\s+/);
+                            const item = part.trim().split(/\\s+/);
                             item[0] = rewriteUrl(item[0]);
                             return item.join(' ');
                         }}).join(', ');
