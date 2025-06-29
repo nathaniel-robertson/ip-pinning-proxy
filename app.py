@@ -92,7 +92,7 @@ def proxy_request(target_domain, target_ip, path):
             if (not url_string or url_string.startswith(('#', 'data:', 'mailto:', 'tel:'))): return url_string
             parsed_url = urlparse(url_string)
             if parsed_url.netloc == target_domain: return f"{proxy_root_path}{parsed_url.path}" + (f"?{parsed_url.query}" if parsed_url.query else "")
-            elif not parsed_url.scheme and not parsed_url.netloc:
+            elif not parsed_url.scheme and not parsed_loc.netloc:
                 base_path = os.path.dirname(path.split('?')[0]); absolute_path = os.path.normpath(os.path.join(base_path, url_string))
                 return f"{proxy_root_path}{absolute_path}"
             return url_string
@@ -117,7 +117,6 @@ def proxy_request(target_domain, target_ip, path):
 
         # --- MODIFIED: Inject script based on COOKIE and fixed the NameError ---
         if request.cookies.get('dynamicRewrite') == 'true' and soup.head:
-            # Use triple quotes and the correct Python variable `{target_domain}`
             observer_script_text = f'''
             <script>
             (function() {{
@@ -130,8 +129,11 @@ def proxy_request(target_domain, target_ip, path):
                         return urlString;
                     }}
                     try {{
-                        // BUGFIX: Use the correct python variable `{target_domain}` here
-                        const url = new URL(urlString, `https://{target_domain}${currentPath}`);
+                        // BUGFIX: Use standard string concatenation to create the base URL.
+                        // This avoids the syntax collision between Python f-strings and JS template literals.
+                        const baseUrl = 'https://' + targetDomain + currentPath;
+                        const url = new URL(urlString, baseUrl);
+
                         if (url.hostname === targetDomain) {{
                             return proxyRoot + url.pathname + url.search;
                         }}
