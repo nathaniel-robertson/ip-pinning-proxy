@@ -41,7 +41,7 @@
         </div>
         <div class="checkbox-group">
             <input type="checkbox" id="dynamic-rewrite" name="dynamic-rewrite">
-            <label for="dynamic-rewrite">Enable dynamic content rewriting (for modern JS-heavy sites)</label>
+            <label for="dynamic-rewrite">Enable dynamic content rewriting (Experimental)</label>
         </div>
 
         <input type="hidden" id="parsed-domain" value="">
@@ -76,18 +76,14 @@
         const path = initialPathInput.value || '/';
 
         if (domain && ip) {
-            let baseUrl = `/${domain}/${ip}${path === '/' ? '' : path}`;
+            // MODIFIED: URL structure is now /ip/domain/path
+            let baseUrl = `/${ip}/${domain}${path === '/' ? '' : path}`;
             const finalUrl = new URL(baseUrl, window.location.origin);
 
-            // The user agent suffix is the only one that needs to be a query param
-            // because the server can't know about it otherwise (it's a one-time thing per session).
             if (uaCheckbox.checked) {
                 finalUrl.searchParams.append('add_ua_suffix', 'true');
             }
             
-            // REMOVED: The dynamic rewrite logic is no longer appended here.
-            // The server will use the cookie instead.
-
             window.location.href = finalUrl.href;
         } else {
             alert('Please fill in a valid domain/URL and ensure an IP address is populated.');
