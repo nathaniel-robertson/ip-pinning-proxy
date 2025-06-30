@@ -28,12 +28,12 @@ The repository is structured as a standard Flask application.
 
 
 /
-├── app.py              # The main Flask application logic
-├── templates/
-│   └── index.html      # The HTML for the front-page UI
-├── requirements.txt    # Lists the Python libraries needed
-├── Procfile            # Tells the hosting service how to run the app
-└── hash_password.py    # A utility script for generating secure password hashes
+├── app.py              # The main Flask application logic  
+├── templates/  
+│   └── index.html      # The HTML for the front-page UI  
+├── requirements.txt    # Lists the Python libraries needed  
+├── Procfile            # Tells the hosting service how to run the app  
+└── hash_password.py    # A utility script for generating secure password hashes  
 
 **Note:** `hash_password.py` is a developer utility and is not part of the running web application. It will not be accessible via the web.
 
