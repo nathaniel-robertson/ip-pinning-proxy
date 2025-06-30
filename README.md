@@ -43,7 +43,7 @@ The repository is structured as a standard Flask application.
 
 ## Deployment
 
-This application is designed for easy deployment to a platform-as-a-service (PaaS) like Kinsta Application Hosting, Heroku, or Render.
+This application is designed for easy deployment to a platform-as-a-service (PaaS) like Sevalla, Heroku, or Render.
 
 **Step 1: Push to a Git Repository**
 Create a new repository on a service like GitHub and push all the project files to it.
